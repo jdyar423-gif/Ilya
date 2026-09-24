@@ -10,8 +10,8 @@ import json
 from .api import Engine
 from .coherence import iff
 
-SCENE = ("alpha red cube large . beta blue ball tiny . gamma green cone small . "
-         "alpha left beta . beta left gamma .")
+SCENE = ("alpha red . alpha cube . alpha large . beta blue . beta ball . beta tiny . "
+         "gamma green . gamma cone . gamma small . alpha left beta . beta left gamma .")
 
 
 def show(title, out):

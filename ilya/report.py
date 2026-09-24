@@ -95,3 +95,51 @@ def write_report(results, path):
                   num(M[n]["guarantees"]["conformal_set_size"], 2)] for n in names]), ""]
     with open(path, "w") as f:
         f.write("\n".join(L) + "\n")
+
+
+def _mean(xs):
+    xs = [x for x in xs if x is not None]
+    return sum(xs) / len(xs) if xs else None
+
+
+def summary_rows(M):
+    """Headline rows (label, key-fn) for the README summary."""
+    oos = ["oos_absent", "oos_missing", "oos_recipe", "oos_weather", "oos_soup"]
+    novel = ["oos_weather", "oos_soup"]
+
+    def long_best(v):
+        long = v["long"]
+        key = "anytime" if "anytime" in long else "fixed"
+        by = long[key]["by_hops"]
+        return _mean([by.get(h, by.get(str(h))) for h in range(4, 8)])
+
+    return [
+        ("分布内准确率", lambda v: pct(v["id"]["all"]["acc"])),
+        ("分布内 ECE（越低越好）", lambda v: num(v["id"]["all"]["ece"])),
+        ("越界输入判为 NONE 的比例（5 类平均）", lambda v: pct(_mean([v["oos"][s]["none_rate"] for s in oos]))),
+        ("越界输入上的高置信错误（≥0.9，5 类平均）", lambda v: pct(_mean([v["oos"][s]["confident_wrong@0.9"] for s in oos]))),
+        ("全新越界类型检测 AUROC（训练中从未出现）", lambda v: num(_mean([v["oos"][s]["ood_auroc"] for s in novel]))),
+        ("选项洗牌后判决翻转率", lambda v: pct(v["shuffle"]["flip_rate"])),
+        ("误导性选项名下的准确率", lambda v: pct(v["misleading"]["misleading_names_acc"])),
+        ("按名称而非 rubric 作答的比例", lambda v: pct(v["misleading"]["followed_name_rate"])),
+        ("约束违反率：隔离判决 → 条件化后（颜色束）",
+         lambda v: f"{pct(v['coherence']['color']['independent_violation_rate'])} → {pct(v['coherence']['color']['conditioned_violation_rate'])}"),
+        ("约束违反率：隔离判决 → 条件化后（计数束）",
+         lambda v: f"{pct(v['coherence']['count']['independent_violation_rate'])} → {pct(v['coherence']['count']['conditioned_violation_rate'])}"),
+        ("认证覆盖率（部署混合，风险 ≤5% @ 90%）", lambda v: pct(v["guarantees"]["certified_coverage"])),
+        ("长链多跳（4–7 跳，训练最多 5 跳）", lambda v: pct(long_best(v))),
+        ("吞吐（每次调用 32 题，决策/秒，CPU）", lambda v: num(v["speed"]["decisions_per_sec"], 0)),
+    ]
+
+
+def update_readme(results, path):
+    M = results["models"]
+    names = [n for n in ("ilya", "jev", "jev_none") if n in M]
+    head = ["指标"] + [NAMES[n] for n in names]
+    rows = [[label] + [fn(M[n]) for n in names] for label, fn in summary_rows(M)]
+    block = ("<!-- RESULTS -->\n### 结果摘要（自动生成，详见 [`results/REPORT.md`](results/REPORT.md)）\n\n"
+             + table(head, rows) + "\n<!-- /RESULTS -->")
+    s = open(path).read()
+    a, b = s.index("<!-- RESULTS -->"), s.index("<!-- /RESULTS -->") + len("<!-- /RESULTS -->")
+    with open(path, "w") as f:
+        f.write(s[:a] + block + s[b:])

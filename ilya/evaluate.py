@@ -356,8 +356,11 @@ def run(paths, cfg):
             continue
         kind, model, ck = load(path)
         t0 = time.time()
+        if kind == "ilya" and cfg["T"] is None:  # evaluate inside the trained loop range
+            cfg = dict(cfg, T=ck["args"]["t_max"])
         temp = calibrate(model, kind, cfg)
-        res = {"params": ck["params"], "train_steps": ck["args"]["steps"], "temperature": temp}
+        res = {"params": ck["params"], "train_steps": ck["args"]["steps"], "temperature": temp,
+               "max_iterations": cfg["T"] if kind == "ilya" else None}
         res["id"], id_scores = exp_id(model, kind, temp, cfg)
         res["oos"] = exp_oos(model, kind, temp, cfg, id_scores)
         res["shuffle"] = exp_shuffle(model, kind, temp, cfg)
@@ -382,10 +385,11 @@ def main(argv=None):
     ap.add_argument("--out", default="results")
     ap.add_argument("--scale", type=float, default=1.0, help="shrink every split (for smoke runs)")
     ap.add_argument("--threads", type=int, default=4)
+    ap.add_argument("--readme", help="also refresh the results block of this README")
     args = ap.parse_args(argv)
     torch.set_num_threads(args.threads)
     scale = args.scale
-    cfg = {"T": 16, "halt": 0.97, "T_long": 32, "long_T": [2, 4, 8, 16, 24, 32],
+    cfg = {"T": None, "halt": 0.97, "T_long": 32, "long_T": [2, 4, 8, 16, 24, 32],
            "n_cal": int(3000 * scale), "n_id": int(3000 * scale), "n_oos": int(1000 * scale),
            "n_mis": int(1500 * scale), "n_long": int(2800 * scale), "n_bundles": int(500 * scale),
            "n_pool": int(4000 * scale)}
@@ -393,8 +397,10 @@ def main(argv=None):
     os.makedirs(args.out, exist_ok=True)
     with open(os.path.join(args.out, "results.json"), "w") as f:
         json.dump(results, f, indent=1)
-    from .report import write_report
+    from .report import update_readme, write_report
     write_report(results, os.path.join(args.out, "REPORT.md"))
+    if args.readme:
+        update_readme(results, args.readme)
     print("wrote", args.out)
 
 
