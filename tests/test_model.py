@@ -93,3 +93,22 @@ def test_jev_prefix_cache_matches_full_forward(rope, ident, readout):
         cached = jev.score_suffixes(cache, ids, ids != VOCAB.pad, torch.tensor([len(s) - 1 for s in suf]),
                                     b["labels"], b["label_mask"], prefix)
         assert torch.allclose(full, cached, atol=1e-4)
+
+
+@pytest.mark.parametrize("ident", [False, True])
+def test_jev_grouped_training_path_matches_full_forward(ident):
+    from ilya.batching import collate_jev_grouped
+    torch.manual_seed(0)
+    jev = JevReplica(len(VOCAB), d=64, ff=128, layers=2, rope=True, ident=ident)
+    for blk in jev.blocks:
+        if blk.attn.beta is not None:
+            blk.attn.beta.data.normal_()
+    rng = random.Random(3)
+    exs = [ex for _ in range(3) for ex in sample_group(rng, 4, p_oos=0.3)]
+    for with_none in (False, True):
+        full = jev(collate_jev(exs, with_none))
+        grouped = jev.forward_grouped(collate_jev_grouped(exs, with_none))
+        assert collate_jev_grouped(exs, with_none)["prefix"].shape[0] == 3
+        assert torch.allclose(full, grouped, atol=1e-4)
+        grouped.logsumexp(-1).sum().backward()  # gradients flow through the shared prefix
+        assert jev.tok.weight.grad is not None

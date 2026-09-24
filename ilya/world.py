@@ -1,8 +1,9 @@
 """A synthetic, fully-observable-to-the-generator world for typed decisions.
 
 Every context describes N objects standing on a line. Each object has a colour,
-a shape and a size; adjacent objects are linked by ``A left B .`` sentences that
-are shuffled, so answering "is X left of Y ?" for distant objects requires
+a shape and a size (one fact per sentence: ``alpha red . alpha cube .``);
+adjacent objects are linked by ``A left B .`` sentences; all sentences are
+shuffled, so answering "is X left of Y ?" for distant objects requires
 composing several facts (multi-hop). Some attribute facts are deliberately
 dropped from the context, so a calibrated model must sometimes be unsure.
 
@@ -129,14 +130,12 @@ def make_scene(rng: random.Random, n_min=3, n_max=6, p_drop=0.15) -> Scene:
     dropped = set()
     sentences = []
     for i, o in enumerate(objs):
-        words = [o.name]
+        # One fact per sentence, subject first: "alpha red . alpha cube ."
         for attr in ("color", "shape", "size"):
             if rng.random() < p_drop:
                 dropped.add((i, attr))
             else:
-                words.append(getattr(o, attr))
-        if len(words) > 1:
-            sentences.append(words + ["."])
+                sentences.append([o.name, getattr(o, attr), "."])
     for a, b in zip(order, order[1:]):
         sentences.append([objs[a].name, "left", objs[b].name, "."])
     rng.shuffle(sentences)

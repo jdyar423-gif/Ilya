@@ -20,7 +20,7 @@ import time
 import torch
 import torch.nn.functional as F
 
-from .batching import collate_ilya, collate_jev
+from .batching import collate_ilya, collate_jev, collate_jev_grouped
 from .jev import JevReplica
 from .model import Ilya
 from .world import VOCAB, make_split, sample_group
@@ -123,8 +123,10 @@ def main(argv=None):
             t_hi = args.t_min + round(loop_scale * (args.t_max - args.t_min))
             loss, _ = ilya_loss(model, collate_ilya(exs), rng.randint(args.t_min, t_hi))
         else:
-            loss, _ = jev_loss(model, collate_jev(exs, with_none=(args.model == "jev_none"),
-                                                  readout=args.readout))
+            b = collate_jev_grouped(exs, with_none=(args.model == "jev_none"), readout=args.readout)
+            logits = model.forward_grouped(b) if args.rope else model(collate_jev(
+                exs, with_none=(args.model == "jev_none"), readout=args.readout))
+            loss = F.cross_entropy(logits, b["target"], ignore_index=-100)
         opt.zero_grad(set_to_none=True)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)

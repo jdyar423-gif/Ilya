@@ -108,3 +108,28 @@ def collate_jev(examples, with_none, vocab=VOCAB, readout="name"):
         "labels": lab, "label_mask": lab != vocab.pad,
         "target": torch.tensor(targets), "prefix_len": torch.tensor(prefix),
     }
+
+
+def collate_jev_grouped(examples, with_none, vocab=VOCAB, readout="name"):
+    """Like :func:`collate_jev`, but each distinct context object becomes one
+    prefix row shared by its questions (for :meth:`JevReplica.forward_grouped`)."""
+    rows, ctx_index, prefixes = {}, [], []
+    for ex in examples:
+        if id(ex.context) not in rows:
+            rows[id(ex.context)] = len(rows)
+            prefixes.append(vocab.encode(["[BOS]"] + list(ex.context)))
+        ctx_index.append(rows[id(ex.context)])
+    suffixes, labels, targets = [], [], []
+    for ex in examples:
+        suffix, labs = jev_suffix(ex.question, with_none, readout)
+        suffixes.append(vocab.encode(suffix))
+        labels.append(vocab.encode(labs))
+        g = ex.question.gold
+        targets.append(g if g >= 0 else (len(labs) - 1 if with_none else -100))
+    pre, suf, lab = _pad(prefixes, vocab.pad), _pad(suffixes, vocab.pad), _pad(labels, vocab.pad)
+    return {
+        "prefix": pre, "prefix_mask": pre != vocab.pad, "ctx_index": torch.tensor(ctx_index),
+        "suffix": suf, "suffix_mask": suf != vocab.pad,
+        "ans_pos": torch.tensor([len(s) - 1 for s in suffixes]),
+        "labels": lab, "label_mask": lab != vocab.pad, "target": torch.tensor(targets),
+    }

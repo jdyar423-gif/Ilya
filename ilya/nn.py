@@ -11,10 +11,13 @@ import torch.nn.functional as F
 
 
 def rope(x, pos):
-    """Rotary position embedding for ``x`` of shape [B, heads, L, dh]."""
+    """Rotary position embedding for ``x`` of shape [B, heads, L, dh];
+    ``pos`` is [L] (shared) or [B, L] (per row)."""
     half = x.shape[-1] // 2
     freq = 1.0 / (10000 ** (torch.arange(half, device=x.device, dtype=torch.float) / half))
-    ang = pos[:, None].float() * freq[None]
+    ang = pos[..., None].float() * freq
+    if ang.dim() == 3:
+        ang = ang[:, None]
     cos, sin = ang.cos(), ang.sin()
     x1, x2 = x[..., :half], x[..., half:]
     return torch.cat([x1 * cos - x2 * sin, x1 * sin + x2 * cos], dim=-1)
