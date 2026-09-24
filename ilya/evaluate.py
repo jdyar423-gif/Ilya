@@ -293,6 +293,7 @@ def exp_guarantees(model, kind, temp, cfg, eps=0.05, delta=0.1, alpha=0.05, spli
     pool = deployment_pool(cfg)
     lg, y, _ = predict(model, kind, pool, T=cfg["T"], halt=cfg["halt"])
     p = probs_of(lg, temp)
+    valid = torch.isfinite(lg).numpy()  # outcomes the model can express (padding / NONE for closed models excluded)
     y = y.numpy()
     conf, correct = p.max(1), p.argmax(1) == y
     rng = np.random.default_rng(0)
@@ -311,7 +312,7 @@ def exp_guarantees(model, kind, temp, cfg, eps=0.05, delta=0.1, alpha=0.05, spli
             risk.append(rk)
             viol += rk > eps
         qh = conformal_qhat(p[c], y[c], alpha)
-        sets = p[t] >= 1 - qh
+        sets = (p[t] >= 1 - qh) & valid[t]
         set_cov.append(float(sets[np.arange(len(t)), y[t]].mean()))
         set_size.append(float(sets.sum(1).mean()))
     return {"eps": eps, "delta": delta, "alpha": alpha, "pool": len(y),
@@ -360,7 +361,7 @@ def run(paths, cfg):
             cfg = dict(cfg, T=ck["args"]["t_max"])
         temp = calibrate(model, kind, cfg)
         res = {"params": ck["params"], "train_steps": ck["args"]["steps"], "temperature": temp,
-               "max_iterations": cfg["T"] if kind == "ilya" else None}
+               "max_iterations": cfg["T"] if kind == "ilya" else None, "train_log": ck.get("log", [])}
         res["id"], id_scores = exp_id(model, kind, temp, cfg)
         res["oos"] = exp_oos(model, kind, temp, cfg, id_scores)
         res["shuffle"] = exp_shuffle(model, kind, temp, cfg)
@@ -386,6 +387,7 @@ def main(argv=None):
     ap.add_argument("--scale", type=float, default=1.0, help="shrink every split (for smoke runs)")
     ap.add_argument("--threads", type=int, default=4)
     ap.add_argument("--readme", help="also refresh the results block of this README")
+    ap.add_argument("--merge", action="store_true", help="merge into an existing results.json")
     args = ap.parse_args(argv)
     torch.set_num_threads(args.threads)
     scale = args.scale
@@ -395,6 +397,11 @@ def main(argv=None):
            "n_pool": int(4000 * scale)}
     results = run({"ilya": args.ilya, "jev": args.jev, "jev_none": args.jev_none}, cfg)
     os.makedirs(args.out, exist_ok=True)
+    prev = os.path.join(args.out, "results.json")
+    if args.merge and os.path.exists(prev):  # keep models evaluated in an earlier call
+        with open(prev) as f:
+            old = json.load(f)
+        results["models"] = {**old["models"], **results["models"]}
     with open(os.path.join(args.out, "results.json"), "w") as f:
         json.dump(results, f, indent=1)
     from .report import update_readme, write_report

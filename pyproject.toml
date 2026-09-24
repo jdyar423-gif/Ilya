@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ilya"
 version = "0.1.0"
-description = "Open-world, anytime, presentation-invariant, coherent typed decisions — a paradigm beyond System One models such as Jev"
+description = "Open-world, presentation-invariant, coherent and certifiable typed decisions, built against the documented failure modes of System One models such as Jev"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = ["torch>=2.2", "numpy>=1.24"]

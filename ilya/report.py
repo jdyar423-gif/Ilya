@@ -31,6 +31,13 @@ def write_report(results, path):
             num(M[n]["speed"]["ms_per_call"], 1), num(M[n]["speed"]["decisions_per_sec"], 0),
             num(M[n]["speed"]["mean_iterations"], 1)] for n in names]), ""]
 
+    steps = sorted({r["step"] for n in names for r in M[n].get("train_log", [])})
+    if steps:
+        curve = {n: {r["step"]: r["val_acc"] for r in M[n].get("train_log", [])} for n in names}
+        L += ["## Learning curves (validation accuracy during training, same data stream)", "",
+              table(["model"] + [str(s_) for s_ in steps],
+                    [[NAMES[n]] + [pct(curve[n].get(s_)) for s_ in steps] for n in names]), ""]
+
     L += ["## 1. In-distribution decisions", "", table(
         ["model", "acc", "NLL", "Brier", "ECE", "conf AUROC", "acc (answerable)", "NLL (unanswerable)"],
         [[NAMES[n], pct(M[n]["id"]["all"]["acc"]), num(M[n]["id"]["all"]["nll"]), num(M[n]["id"]["all"]["brier"]),
@@ -107,11 +114,9 @@ def summary_rows(M):
     oos = ["oos_absent", "oos_missing", "oos_recipe", "oos_weather", "oos_soup"]
     novel = ["oos_weather", "oos_soup"]
 
-    def long_best(v):
+    def long_overall(v):
         long = v["long"]
-        key = "anytime" if "anytime" in long else "fixed"
-        by = long[key]["by_hops"]
-        return _mean([by.get(h, by.get(str(h))) for h in range(4, 8)])
+        return long["anytime" if "anytime" in long else "fixed"]["acc"]
 
     return [
         ("分布内准确率", lambda v: pct(v["id"]["all"]["acc"])),
@@ -127,7 +132,7 @@ def summary_rows(M):
         ("约束违反率：隔离判决 → 条件化后（计数束）",
          lambda v: f"{pct(v['coherence']['count']['independent_violation_rate'])} → {pct(v['coherence']['count']['conditioned_violation_rate'])}"),
         ("认证覆盖率（部署混合，风险 ≤5% @ 90%）", lambda v: pct(v["guarantees"]["certified_coverage"])),
-        ("长链多跳（4–7 跳，训练最多 5 跳）", lambda v: pct(long_best(v))),
+        ("长链泛化：7–8 个物体的关系题（训练最多 6 个）", lambda v: pct(long_overall(v))),
         ("吞吐（每次调用 32 题，决策/秒，CPU）", lambda v: num(v["speed"]["decisions_per_sec"], 0)),
     ]
 
@@ -135,7 +140,8 @@ def summary_rows(M):
 def update_readme(results, path):
     M = results["models"]
     names = [n for n in ("ilya", "jev", "jev_none") if n in M]
-    head = ["指标"] + [NAMES[n] for n in names]
+    cn = {"ilya": "Ilya", "jev": "Jev 复刻（封闭世界）", "jev_none": "Jev 复刻 + 显式 NOTA 选项"}
+    head = ["指标"] + [cn[n] for n in names]
     rows = [[label] + [fn(M[n]) for n in names] for label, fn in summary_rows(M)]
     block = ("<!-- RESULTS -->\n### 结果摘要（自动生成，详见 [`results/REPORT.md`](results/REPORT.md)）\n\n"
              + table(head, rows) + "\n<!-- /RESULTS -->")
