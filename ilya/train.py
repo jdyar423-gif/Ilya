@@ -87,6 +87,9 @@ def main(argv=None):
     ap.add_argument("--threads", type=int, default=4)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--eval_every", type=int, default=500)
+    ap.add_argument("--curriculum", type=float, default=0.5,
+                    help="fraction of training over which rich option names, out-of-scope data and "
+                         "longer loops are ramped in (identical for every model); 0 disables it")
     ap.add_argument("--out", required=True)
     args = ap.parse_args(argv)
 
@@ -105,11 +108,20 @@ def main(argv=None):
     val = make_split("id", 512, seed=77)
     p_oos = 0.0 if args.model == "jev" else P_OOS
     log, t0, run = [], time.time(), 0.0
+    def ramp(start, width):  # 0 -> 1 between (start) and (start + width) of the curriculum span
+        if args.curriculum <= 0:
+            return 1.0
+        return min(1.0, max(0.0, (step / args.steps - start * args.curriculum) / (width * args.curriculum)))
+
     for step in range(1, args.steps + 1):
+        # Curriculum: first plain option names, in-scope data and short loops;
+        # then ramp in rubric/code names, out-of-scope data and longer loops.
+        rich, oos_scale, loop_scale = ramp(0.2, 0.4), ramp(0.5, 0.5), ramp(0.5, 0.5)
         exs = [ex for _ in range(args.batch // args.group)
-               for ex in sample_group(rng, args.group, p_oos=p_oos)]
+               for ex in sample_group(rng, args.group, p_oos=p_oos * oos_scale, p_rich_names=rich)]
         if args.model == "ilya":
-            loss, _ = ilya_loss(model, collate_ilya(exs), rng.randint(args.t_min, args.t_max))
+            t_hi = args.t_min + round(loop_scale * (args.t_max - args.t_min))
+            loss, _ = ilya_loss(model, collate_ilya(exs), rng.randint(args.t_min, t_hi))
         else:
             loss, _ = jev_loss(model, collate_jev(exs, with_none=(args.model == "jev_none"),
                                                   readout=args.readout))

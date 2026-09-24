@@ -336,11 +336,29 @@ def sample_example(rng: random.Random, *, p_oos=0.0, n_range=(3, 6), families=No
     return Example(scene.context, ask(rng, scene, family))
 
 
-def sample_group(rng: random.Random, n_q=4, *, p_oos=0.0, n_range=(3, 6)) -> list:
+def _plain_names(q):
+    """Curriculum helper: options named by their own value, no rubric."""
+    if q.qtype == "choice":
+        for c in q.cands:
+            c.name, c.rubric = [c.value], []
+    return q
+
+
+def sample_group(rng: random.Random, n_q=4, *, p_oos=0.0, n_range=(3, 6), p_rich_names=1.0) -> list:
     """Several questions about one context (the "encode once, decide many"
     regime). The examples share the same context list object, which the
     batching code uses to encode the context once. The marginal mix of
-    in-scope and out-of-scope questions matches :func:`sample_example`."""
+    in-scope and out-of-scope questions matches :func:`sample_example`.
+    With probability ``1 - p_rich_names`` a question's options are plainly
+    named after their values (used early in the training curriculum)."""
+    out = _sample_group(rng, n_q, p_oos=p_oos, n_range=n_range)
+    for ex in out:
+        if rng.random() >= p_rich_names:
+            _plain_names(ex.question)
+    return out
+
+
+def _sample_group(rng, n_q, *, p_oos, n_range):
     scene = make_scene(rng, *n_range)
     if p_oos > 0 and rng.random() < 0.3 * p_oos:  # a foreign context: everything is out of scope
         ctx = foreign_context(rng, RECIPE)
