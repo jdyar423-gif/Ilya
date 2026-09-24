@@ -9,7 +9,10 @@ from ilya.model import Ilya
 from ilya.world import VOCAB, Candidate, Example, Question, make_split, sample_group
 
 torch.manual_seed(0)
-MODEL = Ilya(len(VOCAB), d=64, ff=128, rope=True).eval()
+MODEL = Ilya(len(VOCAB), d=64, ff=128, rope=True, ident=True).eval()
+for _m in MODEL.modules():  # make the identity bonus non-trivial for the invariance tests
+    if getattr(_m, "beta", None) is not None:
+        _m.beta.data.normal_()
 
 
 def _choice_examples(n=24):
@@ -69,19 +72,24 @@ def test_halting_records_iterations():
     assert (MODEL.last_iterations == 6).all()
 
 
-@pytest.mark.parametrize("rope", [False, True])
+@pytest.mark.parametrize("rope,ident,readout", [(False, False, "label"), (True, False, "name"),
+                                                (True, True, "name"), (True, True, "label")])
 @torch.no_grad()
-def test_jev_prefix_cache_matches_full_forward(rope):
+def test_jev_prefix_cache_matches_full_forward(rope, ident, readout):
     torch.manual_seed(0)
-    jev = JevReplica(len(VOCAB), d=64, ff=128, layers=2, rope=rope).eval()
+    jev = JevReplica(len(VOCAB), d=64, ff=128, layers=2, rope=rope, ident=ident, readout=readout).eval()
+    for blk in jev.blocks:  # make the identity bonus non-trivial
+        if blk.attn.beta is not None:
+            blk.attn.beta.data.normal_()
     group = sample_group(random.Random(2), 5)
     for with_none in (False, True):
-        b = collate_jev(group, with_none)
+        b = collate_jev(group, with_none, readout=readout)
         full = jev(b)
-        cache = jev.encode_prefix(torch.tensor([VOCAB.encode(["[BOS]"] + group[0].context)]))
-        suf = [VOCAB.encode(jev_suffix(ex.question, with_none)[0]) for ex in group]
+        prefix = torch.tensor([VOCAB.encode(["[BOS]"] + group[0].context)])
+        cache = jev.encode_prefix(prefix)
+        suf = [VOCAB.encode(jev_suffix(ex.question, with_none, readout)[0]) for ex in group]
         S = max(map(len, suf))
         ids = torch.tensor([s + [VOCAB.pad] * (S - len(s)) for s in suf])
         cached = jev.score_suffixes(cache, ids, ids != VOCAB.pad, torch.tensor([len(s) - 1 for s in suf]),
-                                    b["labels"], b["label_mask"])
+                                    b["labels"], b["label_mask"], prefix)
         assert torch.allclose(full, cached, atol=1e-4)

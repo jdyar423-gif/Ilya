@@ -56,8 +56,15 @@ def collate_ilya(examples, vocab=VOCAB):
     }
 
 
-def jev_labels(q, with_none):
-    if q.qtype == "choice":
+def jev_labels(q, with_none, readout="name"):
+    """Tokens whose logits are read at the answer slot.
+
+    ``readout="name"``: each option's own (first) name token - the "native
+    token" readout of open Jev-style servers. ``readout="label"``: positional
+    letters / digits, as in simple-jev."""
+    if readout == "name":
+        labels = [c.name[0] for c in q.cands]
+    elif q.qtype == "choice":
         labels = LETTERS[:len(q.cands)]
     elif q.qtype == "score":
         labels = DIGITS[:len(q.cands)]
@@ -66,25 +73,27 @@ def jev_labels(q, with_none):
     return labels + (["[NOTA]"] if with_none else [])
 
 
-def jev_suffix(q, with_none):
-    """Question suffix in the Jev style: options are introduced by positional
-    labels and the answer is read from the label logits at the [ANS] slot."""
+def jev_suffix(q, with_none, readout="name"):
+    """Question suffix in the Jev style: the options are listed in order after
+    the question and the answer is read from the option-token logits at the
+    [ANS] slot."""
     toks = ["[SEP]"] + list(q.instr) + ["[SEP]"]
-    labels = jev_labels(q, with_none)
+    labels = jev_labels(q, with_none, readout)
     for lab, c in zip(labels, q.cands):
-        toks += [lab] + list(c.name) + ([":"] + list(c.rubric) if c.rubric else []) + [";"]
+        prefix = [] if readout == "name" else [lab]
+        toks += prefix + list(c.name) + ([":"] + list(c.rubric) if c.rubric else []) + [";"]
     if with_none:
-        toks += ["[NOTA]", "[NOTA]", ";"]
+        toks += ["[NOTA]", ";"] if readout == "name" else ["[NOTA]", "[NOTA]", ";"]
     return toks + ["[ANS]"], labels
 
 
-def collate_jev(examples, with_none, vocab=VOCAB):
-    """Batch for the Jev replica. Target is the index of the gold label, the
+def collate_jev(examples, with_none, vocab=VOCAB, readout="name"):
+    """Batch for the Jev replica. Target is the index of the gold option, the
     [NOTA] option for out-of-scope items when ``with_none``, else -100 (the
     closed-world model has no way to express NONE)."""
     seqs, labels, targets, prefix = [], [], [], []
     for ex in examples:
-        suffix, labs = jev_suffix(ex.question, with_none)
+        suffix, labs = jev_suffix(ex.question, with_none, readout)
         seq = ["[BOS]"] + list(ex.context) + suffix
         seqs.append(vocab.encode(seq))
         prefix.append(1 + len(ex.context))

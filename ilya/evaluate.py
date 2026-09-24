@@ -52,7 +52,7 @@ def predict(model, kind, examples, T=16, halt=0.97, bs=256, all_iters=False):
             lg = lg if all_iters else lg[-1]
             iters += model.last_iterations.tolist()
         else:
-            b = collate_jev(chunk, with_none=(kind == "jev_none"))
+            b = collate_jev(chunk, with_none=(kind == "jev_none"), readout=model.readout)
             raw = model(b)
             lg = torch.full((len(chunk), raw.shape[1] + (0 if kind == "jev_none" else 1)), float("-inf"))
             for r, ex in enumerate(chunk):
@@ -337,12 +337,12 @@ def exp_speed(model, kind, cfg, M=32, reps=7):
             with_none = kind == "jev_none"
             prefix = torch.tensor([VOCAB.encode(["[BOS]"] + g[0].context)])
             cache = model.encode_prefix(prefix)
-            b = collate_jev(g, with_none)
-            suf = [VOCAB.encode(jev_suffix(ex.question, with_none)[0]) for ex in g]
+            b = collate_jev(g, with_none, readout=model.readout)
+            suf = [VOCAB.encode(jev_suffix(ex.question, with_none, model.readout)[0]) for ex in g]
             S = max(map(len, suf))
             ids = torch.tensor([s + [VOCAB.pad] * (S - len(s)) for s in suf])
             model.score_suffixes(cache, ids, ids != VOCAB.pad, torch.tensor([len(s) - 1 for s in suf]),
-                                 b["labels"], b["label_mask"])
+                                 b["labels"], b["label_mask"], prefix)
         times.append(time.perf_counter() - t0)
     ms = float(np.median(times[2:]) * 1000)
     return {"questions_per_call": M, "ms_per_call": ms, "decisions_per_sec": M / ms * 1000,

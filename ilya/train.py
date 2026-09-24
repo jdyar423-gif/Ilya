@@ -61,7 +61,7 @@ def quick_eval(model, kind, examples, T=8):
             b = collate_ilya(chunk)
             pred = model(b, T=T)[-1].argmax(-1)
         else:
-            b = collate_jev(chunk, with_none=(kind == "jev_none"))
+            b = collate_jev(chunk, with_none=(kind == "jev_none"), readout=model.readout)
             pred = model(b).argmax(-1)
         correct += (pred == b["target"]).sum().item()
     model.train()
@@ -81,6 +81,9 @@ def main(argv=None):
     ap.add_argument("--t_min", type=int, default=6, help="Ilya loop iterations (sampled per step)")
     ap.add_argument("--t_max", type=int, default=10)
     ap.add_argument("--rope", action="store_true", help="rotary positions (both model families)")
+    ap.add_argument("--ident", action="store_true", help="identity-aware attention (both model families)")
+    ap.add_argument("--readout", choices=["name", "label"], default="name",
+                    help="Jev replica: read option-name tokens or positional letter labels")
     ap.add_argument("--threads", type=int, default=4)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--eval_every", type=int, default=500)
@@ -90,9 +93,9 @@ def main(argv=None):
     torch.manual_seed(args.seed)
     torch.set_num_threads(args.threads)
     rng = random.Random(1000 + args.seed)
-    kw = dict(d=args.d, ff=4 * args.d, rope=args.rope)
+    kw = dict(d=args.d, ff=4 * args.d, rope=args.rope, ident=args.ident)
     if args.model != "ilya":
-        kw["layers"] = args.layers
+        kw.update(layers=args.layers, readout=args.readout)
     model = build(args.model, **kw)
     n_params = sum(p.numel() for p in model.parameters())
     print(f"{args.model}: {n_params:,} parameters", flush=True)
@@ -108,7 +111,8 @@ def main(argv=None):
         if args.model == "ilya":
             loss, _ = ilya_loss(model, collate_ilya(exs), rng.randint(args.t_min, args.t_max))
         else:
-            loss, _ = jev_loss(model, collate_jev(exs, with_none=(args.model == "jev_none")))
+            loss, _ = jev_loss(model, collate_jev(exs, with_none=(args.model == "jev_none"),
+                                                  readout=args.readout))
         opt.zero_grad(set_to_none=True)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
